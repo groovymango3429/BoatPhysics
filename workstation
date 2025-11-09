@@ -1,0 +1,132 @@
+-- WorkstationClient.lua
+-- Client-side script for detecting and interacting with workstations
+-- Shows BillboardGui prompts similar to loot pickup and fires OpenCraftingMenu event
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local INTERACTION_KEY = Enum.KeyCode.E
+local MAX_DISTANCE = 10
+
+-- Wait for Events folder
+local Events = ReplicatedStorage:WaitForChild("Events")
+local OpenCraftingMenuEvent = Events:WaitForChild("OpenCraftingMenu")
+
+-- Get reference to crafting GUI to check if it's open
+local playerGui = player:WaitForChild("PlayerGui")
+local craftingGui = playerGui:WaitForChild("CraftingTab")
+local craftingBackground = craftingGui:WaitForChild("Background")
+
+-- Get workstations folder
+local workstationsFolder = Workspace:FindFirstChild("Workstations")
+
+-- Track which workstation is currently being looked at
+local currentWorkstation = nil
+
+-- Function to get the workstation the player is looking at or nearest to
+local function getTargetWorkstation()
+	if not workstationsFolder then return nil end
+
+	local char = player.Character
+	if not char or not char:FindFirstChild("HumanoidRootPart") then return nil end
+
+	local hrp = char.HumanoidRootPart
+	local cam = Workspace.CurrentCamera
+	if not cam then return nil end
+
+	-- First, try raycast to see what player is looking at
+	local rayOrigin = cam.CFrame.Position
+	local rayDir = cam.CFrame.LookVector * MAX_DISTANCE
+
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterDescendantsInstances = {char}
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+	local rayResult = Workspace:Raycast(rayOrigin, rayDir, raycastParams)
+
+	-- Check if raycast hit a workstation
+	if rayResult and rayResult.Instance then
+		local hit = rayResult.Instance
+		-- Check if this part is a child of a workstation
+		for _, workstation in ipairs(workstationsFolder:GetChildren()) do
+			if hit:IsDescendantOf(workstation) then
+				local stationPos = workstation:IsA("BasePart") and workstation.Position or (workstation.PrimaryPart and workstation.PrimaryPart.Position)
+				if stationPos and (hrp.Position - stationPos).Magnitude <= MAX_DISTANCE then
+					return workstation
+				end
+			end
+		end
+	end
+
+	-- If not looking at a workstation, find nearest one within range
+	local nearestStation = nil
+	local nearestDist = MAX_DISTANCE
+
+	for _, workstation in ipairs(workstationsFolder:GetChildren()) do
+		local stationPos = workstation:IsA("BasePart") and workstation.Position or (workstation.PrimaryPart and workstation.PrimaryPart.Position)
+		if stationPos then
+			local dist = (hrp.Position - stationPos).Magnitude
+			if dist < nearestDist then
+				nearestDist = dist
+				nearestStation = workstation
+			end
+		end
+	end
+
+	return nearestStation
+end
+
+-- Update BillboardGui visibility for workstations
+local function updateWorkstationPrompts()
+	if not workstationsFolder then return end
+
+	local targetStation = getTargetWorkstation()
+
+	-- Update current workstation
+	currentWorkstation = targetStation
+
+	-- Show/hide prompts for all workstations
+	for _, workstation in ipairs(workstationsFolder:GetChildren()) do
+		-- Find BillboardGui in the workstation (LootItemBillboardGui)
+		local billboard = nil
+		for _, descendant in ipairs(workstation:GetDescendants()) do
+			if descendant:IsA("BillboardGui") and 
+				(descendant.Name == "LootItemBillboardGui" or descendant.Name == "InteractionPrompt") then
+				billboard = descendant
+				break
+			end
+		end
+
+		if billboard then
+			billboard.Enabled = (workstation == targetStation)
+		end
+	end
+end
+
+-- Handle interaction key press
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed or input.KeyCode ~= INTERACTION_KEY then return end
+
+	-- Don't open workstation menu if crafting GUI is already open
+	if craftingBackground.Visible then return end
+
+	if currentWorkstation then
+		-- Fire event to open crafting menu for this workstation
+		OpenCraftingMenuEvent:FireServer(currentWorkstation.Name)
+	end
+end)
+
+-- Update prompts at a throttled rate (10 times per second)
+local updateInterval = 0.1
+local timeSinceLastUpdate = 0
+
+game:GetService("RunService").Heartbeat:Connect(function(deltaTime)
+	timeSinceLastUpdate = timeSinceLastUpdate + deltaTime
+	if timeSinceLastUpdate >= updateInterval then
+		updateWorkstationPrompts()
+		timeSinceLastUpdate = 0
+	end
+end)
