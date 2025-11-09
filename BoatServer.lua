@@ -122,12 +122,16 @@ end
 
 -- Initialize the boat
 local function initializeBoat()
+	print("[BoatServer DEBUG] Initializing boat:", boat.Name)
+	
 	-- Find the hull (PrimaryPart)
 	hull = boat.PrimaryPart or boat:FindFirstChild("Hull") or boat:FindFirstChildWhichIsA("BasePart")
 	if not hull then
 		warn("BoatServer: No hull found! Set Model.PrimaryPart or add a part named 'Hull'")
 		return false
 	end
+	
+	print("[BoatServer DEBUG] Found hull:", hull.Name, "Size:", hull.Size)
 	
 	-- Unanchor hull
 	hull.Anchored = false
@@ -142,6 +146,8 @@ local function initializeBoat()
 		warn("BoatServer: No seat found! Add a Seat or VehicleSeat named 'DriverSeat'")
 		return false
 	end
+	
+	print("[BoatServer DEBUG] Found seat:", seat.Name)
 	
 	-- Weld other parts to hull
 	for _, part in ipairs(boat:GetDescendants()) do
@@ -159,6 +165,8 @@ local function initializeBoat()
 		end
 	end
 	
+	print("[BoatServer DEBUG] Welded all parts to hull")
+	
 	-- Create BodyVelocity for movement
 	bodyVelocity = Instance.new("BodyVelocity")
 	bodyVelocity.MaxForce = Vector3.new(0, 0, 0)
@@ -172,6 +180,8 @@ local function initializeBoat()
 	bodyGyro.P = 5000
 	bodyGyro.D = 500
 	bodyGyro.Parent = hull
+	
+	print("[BoatServer DEBUG] Created BodyVelocity and BodyGyro")
 	
 	-- Create float points at corners of boat
 	local hullSize = hull.Size
@@ -206,6 +216,7 @@ local function initializeBoat()
 		end
 	end
 	
+	print("[BoatServer DEBUG] Created", #floatPoints, "float points with debug visualization")
 	print("BoatServer: Initialized boat with hull:", hull.Name)
 	return true
 end
@@ -214,12 +225,18 @@ end
 boatInputEvent.OnServerEvent:Connect(function(player, throttle, steer)
 	-- Validate player is the driver
 	if currentDriver ~= player then
+		print("[BoatServer DEBUG] Input from non-driver:", player.Name, "currentDriver:", currentDriver)
 		return
 	end
 	
 	-- Clamp input values
 	driveThrottle = math.clamp(throttle or 0, -1, 1)
 	driveSteer = math.clamp(steer or 0, -1, 1)
+	
+	-- Debug: Log received inputs periodically
+	if math.abs(driveThrottle) > 0 or math.abs(driveSteer) > 0 then
+		print("[BoatServer DEBUG] Received input from", player.Name, "throttle:", driveThrottle, "steer:", driveSteer)
+	end
 end)
 
 -- Handle seat occupancy changes
@@ -230,16 +247,25 @@ if seat then
 			local character = occupant.Parent
 			local player = Players:GetPlayerFromCharacter(character)
 			if player then
+				print("[BoatServer DEBUG] Player seated:", player.Name)
 				currentDriver = player
-				boatSeatedEvent:FireClient(player, true)
+				boatSeatedEvent:FireClient(player, true, boat)
 			end
 		else
+			print("[BoatServer DEBUG] Player left seat, currentDriver was:", currentDriver)
 			if currentDriver then
 				boatSeatedEvent:FireClient(currentDriver, false)
 			end
 			currentDriver = nil
 			driveThrottle = 0
 			driveSteer = 0
+			
+			-- IMPORTANT: Reset BodyGyro to prevent spinning
+			if bodyGyro then
+				bodyGyro.MaxTorque = Vector3.new(0, 0, 0)
+				bodyGyro.CFrame = hull.CFrame
+				print("[BoatServer DEBUG] Reset BodyGyro after player exit")
+			end
 		end
 	end)
 end
@@ -314,6 +340,10 @@ local function updateBoatPhysics(deltaTime)
 	
 	if currentDriver and math.abs(driveThrottle) > 0.01 then
 		targetVelocity = forwardHorizontal * driveThrottle * CONFIG.maxSpeed
+		-- Debug log movement
+		if math.floor(tick() * 2) % 4 == 0 then -- Log every 2 seconds
+			print("[BoatServer DEBUG] Moving boat: throttle =", driveThrottle, "targetVel =", targetVelocity)
+		end
 	end
 	
 	-- Apply drag based on terrain
@@ -336,8 +366,11 @@ local function updateBoatPhysics(deltaTime)
 	
 	bodyVelocity.Velocity = totalForce
 	
-	-- Handle turning (yaw)
-	if currentDriver and math.abs(driveSteer) > 0.01 then
+	-- Handle turning (yaw) - ONLY when driver is present and steering
+	local hasDriver = currentDriver ~= nil
+	local isSteering = math.abs(driveSteer) > 0.01
+	
+	if hasDriver and isSteering then
 		-- Only turn when moving
 		local speed = currentVelocity.Magnitude
 		local turnAmount = driveSteer * CONFIG.turnSpeed * math.max(speed / CONFIG.maxSpeed, 0.2)
@@ -348,11 +381,20 @@ local function updateBoatPhysics(deltaTime)
 		
 		bodyGyro.MaxTorque = Vector3.new(0, 10000, 0) * totalMass
 		bodyGyro.CFrame = newCFrame
+		
+		-- Debug log turning
+		if math.floor(tick() * 2) % 4 == 0 then
+			print("[BoatServer DEBUG] Turning boat: steer =", driveSteer, "turnAmount =", turnAmount)
+		end
+	elseif hasDriver then
+		-- Driver present but not steering - maintain orientation for stabilization only
+		bodyGyro.MaxTorque = Vector3.new(0, 0, 0)
 	else
+		-- No driver - completely disable BodyGyro
 		bodyGyro.MaxTorque = Vector3.new(0, 0, 0)
 	end
 	
-	-- Apply stabilization (keep boat upright)
+	-- Apply stabilization (keep boat upright) - ONLY if in water
 	if isInWater then
 		local upVector = hull.CFrame.UpVector
 		local targetUp = Vector3.new(0, 1, 0)
@@ -367,14 +409,20 @@ local function updateBoatPhysics(deltaTime)
 			if correctionAxis.Magnitude > 0.001 then
 				correctionAxis = correctionAxis.Unit
 				
-				-- Apply corrective torque
+				-- Apply corrective torque using BodyGyro's existing orientation
 				local torqueMagnitude = math.min(tilt * CONFIG.stabilizationStrength, CONFIG.maxStabilizationTorque)
-				local torque = correctionAxis * torqueMagnitude * totalMass
 				
-				-- Convert to local space for BodyGyro
-				bodyGyro.MaxTorque = Vector3.new(10000, 10000, 10000) * totalMass
-				bodyGyro.P = 5000
-				bodyGyro.D = 500
+				-- Only apply stabilization if not actively steering or if no driver
+				if not (hasDriver and isSteering) then
+					-- Calculate target CFrame that keeps current yaw but levels the boat
+					local currentYaw = math.atan2(forwardHorizontal.X, forwardHorizontal.Z)
+					local targetCFrame = CFrame.new(hull.Position) * CFrame.Angles(0, currentYaw, 0)
+					
+					bodyGyro.MaxTorque = Vector3.new(5000, 0, 5000) * totalMass
+					bodyGyro.CFrame = targetCFrame
+					bodyGyro.P = 3000
+					bodyGyro.D = 500
+				end
 			end
 		end
 	end

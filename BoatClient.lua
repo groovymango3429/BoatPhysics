@@ -140,8 +140,13 @@ local function updateBoatPrompts()
 	local boatsFolder = getBoatsFolder()
 	if not boatsFolder then return end
 	
-	local targetBoat = getTargetBoat()
-	currentBoat = targetBoat
+	local targetBoat = nil
+	
+	-- Don't show any prompts if player is seated
+	if not isSeated then
+		targetBoat = getTargetBoat()
+		currentBoat = targetBoat
+	end
 	
 	-- Update prompts for all boats
 	for _, boat in ipairs(boatsFolder:GetChildren()) do
@@ -149,7 +154,12 @@ local function updateBoatPrompts()
 			local billboard = ensureBoatPrompt(boat)
 			if billboard then
 				-- Only show prompt if player is not seated and this is the target boat
-				billboard.Enabled = (boat == targetBoat and not isSeated)
+				local shouldShow = (boat == targetBoat and not isSeated)
+				billboard.Enabled = shouldShow
+				-- Debug output when state changes
+				if billboard.Enabled ~= shouldShow then
+					print("[BoatClient DEBUG] Billboard visibility changed for", boat.Name, ":", shouldShow)
+				end
 			end
 		end
 	end
@@ -157,20 +167,35 @@ end
 
 -- Try to board the current boat
 local function tryBoardBoat()
-	if not currentBoat or isSeated then return end
+	if not currentBoat or isSeated then 
+		print("[BoatClient DEBUG] Cannot board: currentBoat =", currentBoat, "isSeated =", isSeated)
+		return 
+	end
+	
+	print("[BoatClient DEBUG] Attempting to board boat:", currentBoat.Name)
 	
 	local seat = currentBoat:FindFirstChild("DriverSeat") or 
 	             currentBoat:FindFirstChildWhichIsA("Seat") or 
 	             currentBoat:FindFirstChildWhichIsA("VehicleSeat")
 	
-	if not seat then return end
+	if not seat then 
+		print("[BoatClient DEBUG] No seat found in boat:", currentBoat.Name)
+		return 
+	end
 	
 	local char = player.Character
-	if not char then return end
+	if not char then 
+		print("[BoatClient DEBUG] No character found")
+		return 
+	end
 	
 	local humanoid = char:FindFirstChildOfClass("Humanoid")
-	if not humanoid then return end
+	if not humanoid then 
+		print("[BoatClient DEBUG] No humanoid found in character")
+		return 
+	end
 	
+	print("[BoatClient DEBUG] Sitting player in seat:", seat.Name)
 	-- Sit the player in the seat
 	seat:Sit(humanoid)
 end
@@ -180,22 +205,28 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	if processed then return end
 	
 	if input.KeyCode == INTERACTION_KEY then
+		print("[BoatClient DEBUG] E key pressed, attempting to board boat")
 		tryBoardBoat()
 	end
 	
-	-- Handle driving controls when seated
-	if isSeated then
-		if input.UserInputType == Enum.UserInputType.Keyboard then
-			keysDown[input.KeyCode] = true
+	-- Handle driving controls - track key presses regardless of seated state
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		keysDown[input.KeyCode] = true
+		print("[BoatClient DEBUG] Key pressed:", input.KeyCode, "isSeated:", isSeated)
+		-- Update driving input if seated
+		if isSeated then
 			updateDrivingInput()
 		end
 	end
 end)
 
 UserInputService.InputEnded:Connect(function(input, processed)
-	if isSeated then
-		if input.UserInputType == Enum.UserInputType.Keyboard then
-			keysDown[input.KeyCode] = nil
+	-- Track key releases regardless of seated state
+	if input.UserInputType == Enum.UserInputType.Keyboard then
+		keysDown[input.KeyCode] = nil
+		print("[BoatClient DEBUG] Key released:", input.KeyCode, "isSeated:", isSeated)
+		-- Update driving input if seated
+		if isSeated then
 			updateDrivingInput()
 		end
 	end
@@ -206,6 +237,7 @@ function updateDrivingInput()
 	if not isSeated then
 		throttle = 0
 		steer = 0
+		print("[BoatClient DEBUG] updateDrivingInput: Not seated, clearing inputs")
 		return
 	end
 	
@@ -230,6 +262,8 @@ function updateDrivingInput()
 	else
 		steer = 0
 	end
+	
+	print("[BoatClient DEBUG] updateDrivingInput: throttle =", throttle, "steer =", steer)
 end
 
 -- Handle gamepad input
@@ -257,18 +291,44 @@ RunService.Heartbeat:Connect(function()
 	if now - lastSendTime >= sendInterval then
 		if isSeated then
 			boatInputEvent:FireServer(throttle, steer)
+			-- Debug: Log input sends periodically (every 1 second)
+			if math.floor(now) ~= math.floor(lastSendTime) then
+				print("[BoatClient DEBUG] Sending input to server: throttle =", throttle, "steer =", steer)
+			end
 		end
 		lastSendTime = now
 	end
 end)
 
 -- Listen for seated status changes from server
-boatSeatedEvent.OnClientEvent:Connect(function(seated)
+boatSeatedEvent.OnClientEvent:Connect(function(seated, boatModel)
+	print("[BoatClient DEBUG] Seated status changed:", seated, "Boat:", boatModel)
 	isSeated = seated
-	if not seated then
+	
+	if seated then
+		-- Player just boarded - store the boat reference
+		currentBoat = boatModel
+		print("[BoatClient DEBUG] Player boarded boat, hiding all prompts")
+		-- Immediately hide all billboard prompts
+		local boatsFolder = getBoatsFolder()
+		if boatsFolder then
+			for _, boat in ipairs(boatsFolder:GetChildren()) do
+				if boat:IsA("Model") and boat.PrimaryPart then
+					local billboard = boat.PrimaryPart:FindFirstChild("InteractionPrompt")
+					if billboard then
+						billboard.Enabled = false
+						print("[BoatClient DEBUG] Hiding billboard for boat:", boat.Name)
+					end
+				end
+			end
+		end
+	else
+		-- Player left boat - clear inputs and state
+		print("[BoatClient DEBUG] Player left boat, clearing inputs")
 		throttle = 0
 		steer = 0
 		keysDown = {}
+		currentBoat = nil
 	end
 end)
 
