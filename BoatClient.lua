@@ -155,7 +155,8 @@ local function updateBoatPrompts()
 			local billboard = ensureBoatPrompt(boat)
 			if billboard then
 				-- Only show prompt if player is not seated and this is the target boat
-				local shouldShow = (boat == targetBoat and not isSeated)
+				-- Extra safety: always hide if seated, regardless of targetBoat
+				local shouldShow = (not isSeated) and (boat == targetBoat)
 				billboard.Enabled = shouldShow
 			end
 		end
