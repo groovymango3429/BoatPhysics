@@ -23,8 +23,8 @@ local CONFIG = {
 	terrainFriction = 10,       -- Friction when on land/terrain
 
 	-- Buoyancy settings
-	buoyancyForce = 1.8,        -- Multiplier for upward force in water
-	buoyancyDamping = 45,       -- Damping to reduce oscillation
+	buoyancyForce = 0.5,        -- Multiplier for upward force in water (reduced from 1.8 to prevent bouncing)
+	buoyancyDamping = 0.8,      -- Damping to reduce oscillation (changed to velocity-based damping)
 	waterDetectionDepth = 1.5,  -- How deep to check for water below float points
 	floatHeight = 0.5,          -- Target height above water surface
 
@@ -241,7 +241,7 @@ local function updateBoatPhysics(deltaTime)
 
 	-- Check float points for water contact
 	local floatPointsInWater = 0
-	local totalBuoyancy = Vector3.new(0, 0, 0)
+	local totalBuoyancyVelocity = 0  -- Changed to track velocity change, not force
 	local avgWaterLevel = 0
 	local waterLevelCount = 0
 
@@ -256,14 +256,18 @@ local function updateBoatPhysics(deltaTime)
 			local submersion = waterLevel - worldPos.Y + CONFIG.floatHeight
 
 			if submersion > 0 then
-				-- Apply buoyancy force based on submersion
-				local buoyancyPerPoint = (submersion * CONFIG.buoyancyForce * totalMass * workspace.Gravity) / CONFIG.numFloatPoints
-
-				-- Apply damping based on vertical velocity
-				local damping = hull.AssemblyLinearVelocity.Y * CONFIG.buoyancyDamping / CONFIG.numFloatPoints
-
-				local force = buoyancyPerPoint - damping
-				totalBuoyancy = totalBuoyancy + Vector3.new(0, force, 0)
+				-- Apply buoyancy as velocity correction based on submersion
+				-- The deeper we are, the more upward velocity we want
+				local targetUpwardVelocity = submersion * CONFIG.buoyancyForce * 10
+				
+				-- Get current vertical velocity
+				local currentVerticalVelocity = hull.AssemblyLinearVelocity.Y
+				
+				-- Calculate desired velocity change with damping
+				local velocityCorrection = (targetUpwardVelocity - currentVerticalVelocity) * CONFIG.buoyancyDamping
+				
+				-- Accumulate velocity corrections from all float points
+				totalBuoyancyVelocity = totalBuoyancyVelocity + velocityCorrection / CONFIG.numFloatPoints
 
 				avgWaterLevel = avgWaterLevel + waterLevel
 				waterLevelCount = waterLevelCount + 1
@@ -317,9 +321,9 @@ local function updateBoatPhysics(deltaTime)
 
 	-- Apply buoyancy or gravity
 	if isInWater then
-		-- In water - apply buoyancy
+		-- In water - apply buoyancy velocity correction
 		bodyVelocity.MaxForce = Vector3.new(4000, 4000, 4000) * totalMass
-		totalForce = totalForce + totalBuoyancy / totalMass
+		totalForce = totalForce + Vector3.new(0, totalBuoyancyVelocity, 0)
 	else
 		-- On land - let gravity work, only control horizontal
 		bodyVelocity.MaxForce = Vector3.new(4000, 0, 4000) * totalMass
