@@ -17,24 +17,24 @@ local CONFIG = {
 
 	-- Movement settings
 	maxSpeed = 25,              -- Maximum speed in studs/second
-	acceleration = 3,           -- How fast the boat accelerates
-	turnSpeed = 1.2,            -- How fast the boat turns
+	acceleration = 4,           -- How fast the boat accelerates (slightly snappier)
+	turnSpeed = 7,            -- How fast the boat turns (increased responsiveness)
 	waterDrag = 2.5,            -- Drag when in water
 	terrainFriction = 10,       -- Friction when on land/terrain
 
-	-- Buoyancy settings
-	buoyancyForce = 0.5,        -- Multiplier for upward force in water (reduced from 1.8 to prevent bouncing)
-	buoyancyDamping = 0.8,      -- Damping to reduce oscillation (changed to velocity-based damping)
+	-- Buoyancy settings (tuned to avoid short bursts and sinking)
+	buoyancyForce = 1.2,        -- Upward force multiplier
+	buoyancyDamping = 6.0,      -- Higher damping to reduce oscillation
 	waterDetectionDepth = 1.5,  -- How deep to check for water below float points
-	floatHeight = 0.5,          -- Target height above water surface
+	floatHeight = 1.0,          -- Target height above water surface (raised to prevent sinking)
 
 	-- Physics settings
 	enableGravity = true,
 	gravityScale = 1.0,
 
 	-- Stabilization (keeps boat upright)
-	stabilizationStrength = 0.4,
-	maxStabilizationTorque = 2.0,
+	stabilizationStrength = 0.6,
+	maxStabilizationTorque = 6.0,
 
 	-- Float points (corners of boat for buoyancy calculation)
 	numFloatPoints = 4,
@@ -42,6 +42,27 @@ local CONFIG = {
 
 	-- Player weight - DISABLED per requirements
 	ignorePlayerWeight = true,
+
+	-- Lateral damping (reduces unwanted sideways velocity)
+	lateralDamping = 3.0,       -- moderate suppression of sideways velocity
+
+	-- Angular damping (reduces runaway spins)
+	angularDamping = 4.0,       -- mild rotational damping so turns feel natural
+	maxAngularVelocity = 8.0,   -- clamp for angular velocity (rad/s)
+
+	-- Nosedive compensation (adds upward bias proportional to forward throttle & speed)
+	nosediveCompensation = 1.5, -- moderate upward bias when accelerating
+
+	-- BodyGyro torque tuning for pitch/roll/yaw
+	pitchRollTorque = 6000,     -- X/Z torque to keep level (higher so we don't nose over)
+	yawTorque = 25000,          -- Y torque for steering (much higher to make turning responsive)
+
+	-- Buoyancy smoothing scale (prevent instant large velocity jumps)
+	buoyancyTimeScale = 1.0,    -- how strongly buoyancy applies per second (use deltaTime to scale)
+
+	-- Idle bobbing (small, realistic movement)
+	idleBobFrequency = 1.2,
+	idleBobAmplitude = 0.04,
 
 	-- Debug
 	showDebugPoints = true,
@@ -128,6 +149,32 @@ local function isPointInWater(position)
 	return false, nil
 end
 
+-- Optional helper: add an invisible ballast to centralize mass (uncomment if needed)
+local function addBallast()
+	if boat:FindFirstChild("Ballast") then return end
+	local ballast = Instance.new("Part")
+	ballast.Name = "Ballast"
+	ballast.Size = Vector3.new(0.6, 0.6, 0.6)
+	ballast.Transparency = 1
+	ballast.CanCollide = false
+	ballast.Anchored = false
+	-- Give a large density to increase mass contribution
+	ballast.CustomPhysicalProperties = PhysicalProperties.new(200, 0.5, 0.5, 1, 1)
+	ballast.Parent = boat
+	-- Position it just under hull center (if hull exists this will be adjusted later)
+	spawn(function()
+		wait(0.02)
+		if hull then
+			ballast.Position = hull.Position - Vector3.new(0, math.max(hull.Size.Y/2,1), 0)
+		end
+	end)
+
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = hull
+	weld.Part1 = ballast
+	weld.Parent = ballast
+end
+
 -- Initialize the boat
 local function initializeBoat()
 	print("[BoatServer DEBUG] Initializing boat:", boat.Name)
@@ -157,13 +204,11 @@ local function initializeBoat()
 
 	print("[BoatServer DEBUG] Found seat:", seat.Name)
 
-	-- Weld other parts to hull
+	-- Weld other parts to hull and disable collisions on non-hull parts
 	for _, part in ipairs(boat:GetDescendants()) do
 		if part:IsA("BasePart") and part ~= hull then
 			part.Anchored = false
-			if part ~= seat then
-				part.CanCollide = false
-			end
+			part.CanCollide = false -- ensure non-hull parts don't cause torque on collisions
 
 			-- Create weld to hull
 			local weld = Instance.new("WeldConstraint")
@@ -173,7 +218,13 @@ local function initializeBoat()
 		end
 	end
 
-	print("[BoatServer DEBUG] Welded all parts to hull")
+	-- Ensure seat is non-collidable and unanchored
+	if seat then
+		seat.CanCollide = false
+		seat.Anchored = false
+	end
+
+	print("[BoatServer DEBUG] Welded all parts to hull and disabled collisions on non-hull parts")
 
 	-- Create BodyVelocity for movement
 	bodyVelocity = Instance.new("BodyVelocity")
@@ -185,8 +236,8 @@ local function initializeBoat()
 	-- Create BodyGyro for stabilization
 	bodyGyro = Instance.new("BodyGyro")
 	bodyGyro.MaxTorque = Vector3.new(0, 0, 0)
-	bodyGyro.P = 5000
-	bodyGyro.D = 500
+	bodyGyro.P = 7000
+	bodyGyro.D = 800
 	bodyGyro.Parent = hull
 
 	print("[BoatServer DEBUG] Created BodyVelocity and BodyGyro")
@@ -225,6 +276,8 @@ local function initializeBoat()
 	end
 
 	print("[BoatServer DEBUG] Created", #floatPoints, "float points with debug visualization")
+	-- Optionally add ballast if model pivot/mass distribution is off (uncomment if needed)
+	-- addBallast()
 	print("BoatServer: Initialized boat with hull:", hull.Name)
 	return true
 end
@@ -235,13 +288,22 @@ local function updateBoatPhysics(deltaTime)
 		return
 	end
 
+	-- Mild angular damping to keep rotations under control but still allow natural turning
+	local angVel = hull.AssemblyAngularVelocity
+	local angDampFactor = math.clamp(1 - CONFIG.angularDamping * deltaTime, 0, 1)
+	angVel = angVel * angDampFactor
+	if angVel.Magnitude > CONFIG.maxAngularVelocity then
+		angVel = angVel.Unit * CONFIG.maxAngularVelocity
+	end
+	hull.AssemblyAngularVelocity = angVel
+
 	-- Get hull mass (ignore player weight per requirements)
 	local hullMass = hull:GetMass()
 	local totalMass = hullMass
 
 	-- Check float points for water contact
 	local floatPointsInWater = 0
-	local totalBuoyancyVelocity = 0  -- Changed to track velocity change, not force
+	local totalBuoyancyVelocity = 0  -- Accumulate velocity corrections from float points
 	local avgWaterLevel = 0
 	local waterLevelCount = 0
 
@@ -252,22 +314,17 @@ local function updateBoatPhysics(deltaTime)
 		if inWater and waterLevel then
 			floatPointsInWater = floatPointsInWater + 1
 
-			-- Calculate submersion depth
+			-- Calculate submersion depth (positive means submerged)
 			local submersion = waterLevel - worldPos.Y + CONFIG.floatHeight
 
 			if submersion > 0 then
-				-- Apply buoyancy as velocity correction based on submersion
-				-- The deeper we are, the more upward velocity we want
-				local targetUpwardVelocity = submersion * CONFIG.buoyancyForce * 10
-				
-				-- Get current vertical velocity
+				-- desired upward velocity proportional to submersion
+				local targetUpwardVelocity = submersion * CONFIG.buoyancyForce * 6 -- smaller multiplier for smoother behavior
 				local currentVerticalVelocity = hull.AssemblyLinearVelocity.Y
-				
-				-- Calculate desired velocity change with damping
-				local velocityCorrection = (targetUpwardVelocity - currentVerticalVelocity) * CONFIG.buoyancyDamping
-				
-				-- Accumulate velocity corrections from all float points
-				totalBuoyancyVelocity = totalBuoyancyVelocity + velocityCorrection / CONFIG.numFloatPoints
+
+				-- Use damping with deltaTime so buoyancy doesn't instant-jump (spring-damper scaled per second)
+				local velocityCorrection = (targetUpwardVelocity - currentVerticalVelocity) * CONFIG.buoyancyDamping * math.clamp(deltaTime * CONFIG.buoyancyTimeScale, 0, 1)
+				totalBuoyancyVelocity = totalBuoyancyVelocity + velocityCorrection
 
 				avgWaterLevel = avgWaterLevel + waterLevel
 				waterLevelCount = waterLevelCount + 1
@@ -290,101 +347,122 @@ local function updateBoatPhysics(deltaTime)
 		avgWaterLevel = avgWaterLevel / waterLevelCount
 	end
 
-	-- Calculate movement forces
+	-- Movement basis vectors
 	local forwardVector = hull.CFrame.LookVector
 	local rightVector = hull.CFrame.RightVector
 
-	-- Horizontal movement direction
+	-- Horizontal movement direction (world-space, flat)
 	local forwardHorizontal = Vector3.new(forwardVector.X, 0, forwardVector.Z)
 	if forwardHorizontal.Magnitude > 0 then forwardHorizontal = forwardHorizontal.Unit end
 	local rightHorizontal = Vector3.new(rightVector.X, 0, rightVector.Z)
 	if rightHorizontal.Magnitude > 0 then rightHorizontal = rightHorizontal.Unit end
 
-	-- Target velocity based on input
-	local targetVelocity = Vector3.new(0, 0, 0)
-
-	if currentDriver and math.abs(driveThrottle) > 0.01 then
-		targetVelocity = forwardHorizontal * driveThrottle * CONFIG.maxSpeed
-		-- Debug log movement
-		--if math.floor(tick() * 2) % 4 == 0 then
-		--	print("[BoatServer DEBUG] Moving boat: throttle =", driveThrottle, "targetVel =", targetVelocity)
-		--end
-	end
-
-	-- Apply drag based on terrain
+	-- Current velocities
 	local currentVelocity = hull.AssemblyLinearVelocity
-	local dragCoefficient = isInWater and CONFIG.waterDrag or CONFIG.terrainFriction
-	local dragForce = -currentVelocity * dragCoefficient * deltaTime
+	local currentHorizontal = Vector3.new(currentVelocity.X, 0, currentVelocity.Z)
+	local currentVertical = currentVelocity.Y
 
-	-- Combine forces
-	local totalForce = targetVelocity + dragForce
-
-	-- Apply buoyancy or gravity
-	if isInWater then
-		-- In water - apply buoyancy velocity correction
-		bodyVelocity.MaxForce = Vector3.new(4000, 4000, 4000) * totalMass
-		totalForce = totalForce + Vector3.new(0, totalBuoyancyVelocity, 0)
-	else
-		-- On land - let gravity work, only control horizontal
-		bodyVelocity.MaxForce = Vector3.new(4000, 0, 4000) * totalMass
+	-- Convert current horizontal velocity into local forward/right components
+	local forwardSpeed = 0
+	local rightSpeed = 0
+	if forwardHorizontal.Magnitude > 0 then
+		forwardSpeed = currentHorizontal:Dot(forwardHorizontal)
+	end
+	if rightHorizontal.Magnitude > 0 then
+		rightSpeed = currentHorizontal:Dot(rightHorizontal)
 	end
 
-	bodyVelocity.Velocity = totalForce
+	-- Desired forward speed from input
+	local desiredForwardSpeed = 0
+	if currentDriver and math.abs(driveThrottle) > 0.01 then
+		desiredForwardSpeed = driveThrottle * CONFIG.maxSpeed
+	end
 
-	-- Handle turning (yaw) - ONLY when driver is present and steering
+	-- Smoothly accelerate forward/backward toward desiredForwardSpeed
+	local accelFactor = math.clamp(CONFIG.acceleration * deltaTime, 0, 1)
+	forwardSpeed = forwardSpeed + (desiredForwardSpeed - forwardSpeed) * accelFactor
+
+	-- Moderate lateral damping so the boat still feels natural in turns
+	local lateralDampingFactor = math.clamp(1 - CONFIG.lateralDamping * deltaTime, 0, 1)
+	rightSpeed = rightSpeed * lateralDampingFactor
+
+	-- Recompose horizontal velocity
+	local desiredHorizontal = forwardHorizontal * forwardSpeed + rightHorizontal * rightSpeed
+
+	-- Compute vertical velocity target from buoyancy (average contributions)
+	local verticalAdjustment = currentVertical
+	if floatPointsInWater > 0 then
+		local avgBuoyancyVelocity = totalBuoyancyVelocity / math.max(1, floatPointsInWater)
+		verticalAdjustment = currentVertical + avgBuoyancyVelocity
+	end
+
+	-- Nosedive compensation: add upward bias when accelerating forward to prevent nose dipping
+	if currentDriver and driveThrottle > 0.01 then
+		local speedFrac = math.clamp(math.abs(forwardSpeed) / CONFIG.maxSpeed, 0, 1)
+		local nosediveBoost = CONFIG.nosediveCompensation * driveThrottle * (0.35 + 0.65 * speedFrac)
+		verticalAdjustment = verticalAdjustment + nosediveBoost * deltaTime
+	end
+
+	-- Idle bobbing for realism when in water and not accelerating heavily
+	if isInWater then
+		local bob = math.sin(tick() * CONFIG.idleBobFrequency) * CONFIG.idleBobAmplitude
+		verticalAdjustment = verticalAdjustment + bob * (1 - math.clamp(math.abs(driveThrottle), 0, 1))
+	end
+
+	-- Limit vertical change rate to avoid quick pops
+	local maxVertChangePerSec = 8
+	local vertDelta = verticalAdjustment - currentVertical
+	local maxDeltaThisFrame = maxVertChangePerSec * deltaTime
+	if math.abs(vertDelta) > maxDeltaThisFrame then
+		verticalAdjustment = currentVertical + math.sign(vertDelta) * maxDeltaThisFrame
+	end
+
+	-- Compose final velocity to assign to BodyVelocity:
+	local finalVelocity = Vector3.new(desiredHorizontal.X, verticalAdjustment, desiredHorizontal.Z)
+
+	-- Set BodyVelocity max force depending on whether we need vertical authority
+	if isInWater then
+		bodyVelocity.MaxForce = Vector3.new(8000, 8000, 8000) * totalMass
+	else
+		bodyVelocity.MaxForce = Vector3.new(8000, 0, 8000) * totalMass
+	end
+
+	bodyVelocity.Velocity = finalVelocity
+
+	-- Handle turning (yaw) and stabilization
 	local hasDriver = currentDriver ~= nil
 	local isSteering = math.abs(driveSteer) > 0.01
 
-	if hasDriver and isSteering then
-		-- Only turn when moving
-		local speed = currentVelocity.Magnitude
-		local turnAmount = driveSteer * CONFIG.turnSpeed * math.max(speed / CONFIG.maxSpeed, 0.2)
-
-		-- Apply rotation
-		local currentCFrame = hull.CFrame
-		local newCFrame = currentCFrame * CFrame.Angles(0, turnAmount * deltaTime, 0)
-
-		bodyGyro.MaxTorque = Vector3.new(0, 10000, 0) * totalMass
-		bodyGyro.CFrame = newCFrame
-	elseif hasDriver then
-		-- Driver present but not steering - maintain orientation for stabilization only
-		bodyGyro.MaxTorque = Vector3.new(0, 0, 0)
-	else
-		-- No driver - completely disable BodyGyro
-		bodyGyro.MaxTorque = Vector3.new(0, 0, 0)
+	-- Compute yaw responsiveness: allow baseline turning even at low speed, scale up with forward speed
+	local forwardSpeedFrac = math.clamp(math.abs(forwardSpeed) / CONFIG.maxSpeed, 0, 1)
+	local baseTurnFactor = 0.45 -- ensures turning remains responsive at zero/low speed
+	local speedTurnFactor = baseTurnFactor + 0.55 * forwardSpeedFrac
+	local yawDelta = 0
+	if hasDriver then
+		yawDelta = driveSteer * CONFIG.turnSpeed * speedTurnFactor * deltaTime
 	end
 
-	-- Apply stabilization (keep boat upright) - ONLY if in water
+	-- Target yaw (preserve current yaw, add yawDelta)
+	local currentYaw = math.atan2(forwardVector.X, forwardVector.Z)
+	local targetYaw = currentYaw + yawDelta
+
+	-- Always keep pitch/roll leveled while in water by enforcing BodyGyro X/Z torque.
+	-- Allow yaw torque to be large for steering.
 	if isInWater then
-		local upVector = hull.CFrame.UpVector
-		local targetUp = Vector3.new(0, 1, 0)
+		local pitchRollT = CONFIG.pitchRollTorque * totalMass
+		local yawT = (hasDriver and isSteering) and (CONFIG.yawTorque * totalMass) or (CONFIG.yawTorque * 0.25 * totalMass)
 
-		-- Calculate tilt
-		local tilt = math.acos(math.clamp(upVector:Dot(targetUp), -1, 1))
-
-		if tilt > math.rad(5) then -- Only stabilize if tilted more than 5 degrees
-			-- Calculate correction axis
-			local correctionAxis = upVector:Cross(targetUp)
-
-			if correctionAxis.Magnitude > 0.001 then
-				correctionAxis = correctionAxis.Unit
-
-				-- Apply corrective torque using BodyGyro's existing orientation
-				local torqueMagnitude = math.min(tilt * CONFIG.stabilizationStrength, CONFIG.maxStabilizationTorque)
-
-				-- Only apply stabilization if not actively steering or if no driver
-				if not (hasDriver and isSteering) then
-					-- Calculate target CFrame that keeps current yaw but levels the boat
-					local currentYaw = math.atan2(forwardHorizontal.X, forwardHorizontal.Z)
-					local targetCFrame = CFrame.new(hull.Position) * CFrame.Angles(0, currentYaw, 0)
-
-					bodyGyro.MaxTorque = Vector3.new(5000, 0, 5000) * totalMass
-					bodyGyro.CFrame = targetCFrame
-					bodyGyro.P = 3000
-					bodyGyro.D = 500
-				end
-			end
-		end
+		bodyGyro.MaxTorque = Vector3.new(pitchRollT, yawT, pitchRollT)
+		bodyGyro.CFrame = CFrame.new(hull.Position) * CFrame.Angles(0, targetYaw, 0)
+		-- keep high P for responsive yaw but tuned D for stability
+		bodyGyro.P = 7000
+		bodyGyro.D = 900
+	else
+		-- On land: allow gravity/terrain to act more, but try to keep level
+		bodyGyro.MaxTorque = Vector3.new(1500 * totalMass, 0, 1500 * totalMass)
+		bodyGyro.CFrame = CFrame.new(hull.Position) * CFrame.Angles(0, targetYaw, 0)
+		bodyGyro.P = 3000
+		bodyGyro.D = 400
 	end
 end
 
@@ -432,36 +510,26 @@ end
 boatInputEvent.OnServerEvent:Connect(function(player, throttle, steer)
 	-- Validate player is the driver
 	if currentDriver ~= player then
-		-- Optionally: log attempts to send input when not driver
-		--print("[BoatServer DEBUG] Input from non-driver:", player.Name, "currentDriver:", currentDriver and currentDriver.Name or "nil")
 		return
 	end
 
 	-- Clamp input values
 	driveThrottle = math.clamp(throttle or 0, -1, 1)
 	driveSteer = math.clamp(steer or 0, -1, 1)
-
-	-- Debug: Log received inputs periodically (optional)
-	--if math.abs(driveThrottle) > 0 or math.abs(driveSteer) > 0 then
-	--	print("[BoatServer DEBUG] Received input from", player.Name, "throttle:", driveThrottle, "steer:", driveSteer)
-	--end
 end)
 
 -- Handle client requests to be seated (server-authoritative)
 boatRequestSeatEvent.OnServerEvent:Connect(function(player, boatModel)
-	-- Basic validation: ensure the request is for this boat model
 	if boatModel ~= boat then
 		return
 	end
 
-	-- Ensure seat exists and isn't occupied
 	if not seat then return end
 	if seat.Occupant then
 		print("[BoatServer DEBUG] Seat already occupied, rejecting request from", player.Name)
 		return
 	end
 
-	-- Validate distance to boat to reduce abuse
 	local char = player.Character
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then
@@ -475,18 +543,15 @@ boatRequestSeatEvent.OnServerEvent:Connect(function(player, boatModel)
 		return
 	end
 
-	if (hrp.Position - boatPos).Magnitude > 12 then -- allow small buffer beyond MAX_DISTANCE
+	if (hrp.Position - boatPos).Magnitude > 12 then
 		print("[BoatServer DEBUG] Rejecting seat request: player too far", player.Name)
 		return
 	end
 
-	-- Ensure humanoid exists and call seat:Sit on server
 	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		print("[BoatServer DEBUG] Server seating player:", player.Name)
-		-- Seat the player's humanoid on the server so Occupant updates and seat events fire properly
 		seat:Sit(humanoid)
-		-- Occupant changed signal will set currentDriver and notify client
 	else
 		print("[BoatServer DEBUG] Can't seat player, no humanoid:", player.Name)
 	end
