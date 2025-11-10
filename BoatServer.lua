@@ -230,7 +230,7 @@ local function initializeBoat()
 	bodyVelocity = Instance.new("BodyVelocity")
 	bodyVelocity.MaxForce = Vector3.new(0, 0, 0)
 	bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-	bodyVelocity.P = 10000
+	bodyVelocity.P = 5000  -- Reduced from 10000 to prevent overshooting
 	bodyVelocity.Parent = hull
 
 	-- Create BodyGyro for stabilization
@@ -414,7 +414,7 @@ local function updateBoatPhysics(deltaTime)
 	end
 
 	-- Limit vertical change rate to avoid quick pops
-	local maxVertChangePerSec = 8
+	local maxVertChangePerSec = 15  -- increased to allow faster response to buoyancy
 	local vertDelta = verticalAdjustment - currentVertical
 	local maxDeltaThisFrame = maxVertChangePerSec * deltaTime
 	if math.abs(vertDelta) > maxDeltaThisFrame then
@@ -426,9 +426,9 @@ local function updateBoatPhysics(deltaTime)
 
 	-- Set BodyVelocity max force depending on whether we need vertical authority
 	if isInWater then
-		bodyVelocity.MaxForce = Vector3.new(8000, 8000, 8000) * totalMass
+		bodyVelocity.MaxForce = Vector3.new(5000, 5000, 5000) * totalMass  -- Reduced from 8000 for smoother control
 	else
-		bodyVelocity.MaxForce = Vector3.new(8000, 0, 8000) * totalMass
+		bodyVelocity.MaxForce = Vector3.new(5000, 0, 5000) * totalMass
 	end
 
 	bodyVelocity.Velocity = finalVelocity
