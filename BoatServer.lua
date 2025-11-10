@@ -23,10 +23,10 @@ local CONFIG = {
 	terrainFriction = 10,       -- Friction when on land/terrain
 
 	-- Buoyancy settings (tuned to avoid short bursts and sinking)
-	buoyancyForce = 1.2,        -- Upward force multiplier
-	buoyancyDamping = 6.0,      -- Higher damping to reduce oscillation
+	buoyancyForce = 2.5,        -- Upward force multiplier (increased for better float)
+	buoyancyDamping = 0.3,      -- Damping factor for smooth transitions
 	waterDetectionDepth = 1.5,  -- How deep to check for water below float points
-	floatHeight = 1.0,          -- Target height above water surface (raised to prevent sinking)
+	floatHeight = 1.5,          -- Target height above water surface (raised to prevent sinking)
 
 	-- Physics settings
 	enableGravity = true,
@@ -51,7 +51,7 @@ local CONFIG = {
 	maxAngularVelocity = 8.0,   -- clamp for angular velocity (rad/s)
 
 	-- Nosedive compensation (adds upward bias proportional to forward throttle & speed)
-	nosediveCompensation = 1.5, -- moderate upward bias when accelerating
+	nosediveCompensation = 0.5, -- reduced upward bias when accelerating to prevent excessive lift
 
 	-- BodyGyro torque tuning for pitch/roll/yaw
 	pitchRollTorque = 6000,     -- X/Z torque to keep level (higher so we don't nose over)
@@ -62,7 +62,7 @@ local CONFIG = {
 
 	-- Idle bobbing (small, realistic movement)
 	idleBobFrequency = 1.2,
-	idleBobAmplitude = 0.04,
+	idleBobAmplitude = 0.02,  -- reduced amplitude for less movement
 
 	-- Debug
 	showDebugPoints = true,
@@ -318,12 +318,16 @@ local function updateBoatPhysics(deltaTime)
 			local submersion = waterLevel - worldPos.Y + CONFIG.floatHeight
 
 			if submersion > 0 then
-				-- desired upward velocity proportional to submersion
-				local targetUpwardVelocity = submersion * CONFIG.buoyancyForce * 6 -- smaller multiplier for smoother behavior
+				-- Calculate buoyancy force more smoothly without velocity-based corrections
+				-- Use a simpler proportional force based on submersion depth
+				local buoyancyStrength = submersion * CONFIG.buoyancyForce
+				
+				-- Apply smooth damping based on current vertical velocity to prevent oscillation
 				local currentVerticalVelocity = hull.AssemblyLinearVelocity.Y
-
-				-- Use damping with deltaTime so buoyancy doesn't instant-jump (spring-damper scaled per second)
-				local velocityCorrection = (targetUpwardVelocity - currentVerticalVelocity) * CONFIG.buoyancyDamping * math.clamp(deltaTime * CONFIG.buoyancyTimeScale, 0, 1)
+				local dampingFactor = -currentVerticalVelocity * CONFIG.buoyancyDamping
+				
+				-- Combine buoyancy and damping for smooth behavior
+				local velocityCorrection = buoyancyStrength + dampingFactor
 				totalBuoyancyVelocity = totalBuoyancyVelocity + velocityCorrection
 
 				avgWaterLevel = avgWaterLevel + waterLevel
