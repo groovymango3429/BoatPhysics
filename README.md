@@ -16,9 +16,11 @@ This repository contains a full boat physics implementation with:
 - 🌊 **Realistic Water Physics**: Floats naturally on terrain water using 4-point buoyancy system
 - 🎮 **Easy Interaction**: Press E to board boats with billboard GUI prompts
 - 🚤 **Smooth Driving**: W/A/S/D controls with proper acceleration and turning
-- 🏖️ **Terrain Support**: Drive onto land with realistic friction slowdown
+- 🏖️ **Terrain Support**: Drive onto land with realistic friction slowdown (feels like pushing!)
 - 🪂 **Fall Physics**: Realistically falls from elevated terrain into water
-- 🎯 **Optimized**: Ignores player weight, uses efficient voxel reading
+- 🎯 **Optimized**: Client-side physics eliminates server lag
+- 🚀 **Performance**: No more 2-second lag spikes - physics runs locally
+- 🏝️ **Land Friction**: Heavy resistance on land (25x) vs smooth in water (2.5x)
 - 🎨 **Debug Mode**: Visual float point indicators for testing
 - 🎮 **Gamepad Support**: Works with Xbox/PlayStation controllers
 
@@ -61,22 +63,24 @@ See **QUICKSTART.md** for detailed 5-minute setup or **BoatSetup.md** for comple
 
 ## 🔧 Configuration
 
-Edit the `CONFIG` table in `BoatServer.lua` to customize:
+Edit the `CONFIG` table in `BoatClient.lua` to customize physics:
 
 ```lua
 -- Movement
 maxSpeed = 25,              -- Boat speed (studs/second)
-turnSpeed = 1.2,            -- Turn rate
-terrainFriction = 10,       -- Land slowdown
+acceleration = 5,           -- Acceleration rate
+turnSpeed = 8,              -- Turn rate
+waterDrag = 2.5,            -- Smooth drag in water
+landFriction = 25,          -- Heavy friction on land
 
 -- Buoyancy
-buoyancyForce = 1.8,        -- Float strength
-buoyancyDamping = 45,       -- Bounce reduction
-floatHeight = 0.5,          -- Height above water
+buoyancyForce = 2.5,        -- Float strength
+buoyancyDamping = 0.3,      -- Bounce reduction
+floatHeight = 1.5,          -- Height above water
 
 -- Stabilization
-stabilizationStrength = 0.4, -- Tilt resistance
-maxStabilizationTorque = 2.0, -- Max correction
+stabilizationStrength = 0.6, -- Tilt resistance
+maxStabilizationTorque = 6.0, -- Max correction
 
 -- Debug
 showDebugPoints = true,     -- Show float indicators
@@ -134,15 +138,17 @@ See **BoatSetup.md** for complete troubleshooting guide.
 - Distributed buoyancy forces for stability
 - Auto-stabilization for upright orientation
 
-### Client-Server Architecture
-- **Client**: Handles input, interaction, UI prompts
-- **Server**: Handles physics, validation, state management
-- **RemoteEvents**: `BoatInput` (controls), `BoatSeated` (state)
+### Client-Server Architecture (Updated for Performance)
+- **Client**: Handles input, interaction, UI prompts, **AND ALL PHYSICS** (buoyancy, movement, stabilization)
+- **Server**: Handles seat management, network owner assignment, validation
+- **RemoteEvents**: `BoatSeated` (state), `BoatRequestSeat` (boarding)
 
-### Performance
-- Throttled update rates (client prompts: 10 Hz, input: 30 Hz)
-- Efficient voxel reading with caching
-- Network owner set to server for consistency
+### Performance Improvements
+- **Client-side physics**: No network lag, physics runs locally at 60+ FPS
+- **Land friction**: Boat feels heavy on land (25x friction) vs smooth in water (2.5x drag)
+- Network owner transferred to player when boarding for optimal physics
+- Efficient voxel reading for water detection
+- No more 2-second lag spikes!
 
 ## 🔄 Migration from Old Scripts
 
@@ -158,8 +164,8 @@ If you have the old `BoatScript.lua` or `CustomBoat.lua`:
 
 ```
 BoatPhysics/
-├── BoatServer.lua      # Server physics script (392 lines)
-├── BoatClient.lua      # Client interaction script (287 lines)
+├── BoatServer.lua      # Server seat management (178 lines)
+├── BoatClient.lua      # Client physics + interaction (697 lines)
 ├── BoatSetup.md        # Detailed setup guide (250 lines)
 ├── QUICKSTART.md       # Quick setup guide (135 lines)
 ├── README.md           # This file
