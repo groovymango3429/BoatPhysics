@@ -23,10 +23,10 @@ local CONFIG = {
 	terrainFriction = 10,       -- Friction when on land/terrain
 
 	-- Buoyancy settings (tuned to avoid short bursts and sinking)
-	buoyancyForce = 1.2,        -- Upward force multiplier
-	buoyancyDamping = 6.0,      -- Higher damping to reduce oscillation
+	buoyancyForce = 2.5,        -- Upward force multiplier (increased for better float)
+	buoyancyDamping = 0.3,      -- Damping factor for smooth transitions
 	waterDetectionDepth = 1.5,  -- How deep to check for water below float points
-	floatHeight = 1.0,          -- Target height above water surface (raised to prevent sinking)
+	floatHeight = 1.5,          -- Target height above water surface (raised to prevent sinking)
 
 	-- Physics settings
 	enableGravity = true,
@@ -51,7 +51,7 @@ local CONFIG = {
 	maxAngularVelocity = 8.0,   -- clamp for angular velocity (rad/s)
 
 	-- Nosedive compensation (adds upward bias proportional to forward throttle & speed)
-	nosediveCompensation = 1.5, -- moderate upward bias when accelerating
+	nosediveCompensation = 0.5, -- reduced upward bias when accelerating to prevent excessive lift
 
 	-- BodyGyro torque tuning for pitch/roll/yaw
 	pitchRollTorque = 6000,     -- X/Z torque to keep level (higher so we don't nose over)
@@ -62,7 +62,7 @@ local CONFIG = {
 
 	-- Idle bobbing (small, realistic movement)
 	idleBobFrequency = 1.2,
-	idleBobAmplitude = 0.04,
+	idleBobAmplitude = 0.02,  -- reduced amplitude for less movement
 
 	-- Debug
 	showDebugPoints = true,
@@ -230,7 +230,7 @@ local function initializeBoat()
 	bodyVelocity = Instance.new("BodyVelocity")
 	bodyVelocity.MaxForce = Vector3.new(0, 0, 0)
 	bodyVelocity.Velocity = Vector3.new(0, 0, 0)
-	bodyVelocity.P = 10000
+	bodyVelocity.P = 5000  -- Reduced from 10000 to prevent overshooting
 	bodyVelocity.Parent = hull
 
 	-- Create BodyGyro for stabilization
@@ -318,12 +318,16 @@ local function updateBoatPhysics(deltaTime)
 			local submersion = waterLevel - worldPos.Y + CONFIG.floatHeight
 
 			if submersion > 0 then
-				-- desired upward velocity proportional to submersion
-				local targetUpwardVelocity = submersion * CONFIG.buoyancyForce * 6 -- smaller multiplier for smoother behavior
+				-- Calculate buoyancy force more smoothly without velocity-based corrections
+				-- Use a simpler proportional force based on submersion depth
+				local buoyancyStrength = submersion * CONFIG.buoyancyForce
+				
+				-- Apply smooth damping based on current vertical velocity to prevent oscillation
 				local currentVerticalVelocity = hull.AssemblyLinearVelocity.Y
-
-				-- Use damping with deltaTime so buoyancy doesn't instant-jump (spring-damper scaled per second)
-				local velocityCorrection = (targetUpwardVelocity - currentVerticalVelocity) * CONFIG.buoyancyDamping * math.clamp(deltaTime * CONFIG.buoyancyTimeScale, 0, 1)
+				local dampingFactor = -currentVerticalVelocity * CONFIG.buoyancyDamping
+				
+				-- Combine buoyancy and damping for smooth behavior
+				local velocityCorrection = buoyancyStrength + dampingFactor
 				totalBuoyancyVelocity = totalBuoyancyVelocity + velocityCorrection
 
 				avgWaterLevel = avgWaterLevel + waterLevel
@@ -410,7 +414,7 @@ local function updateBoatPhysics(deltaTime)
 	end
 
 	-- Limit vertical change rate to avoid quick pops
-	local maxVertChangePerSec = 8
+	local maxVertChangePerSec = 15  -- increased to allow faster response to buoyancy
 	local vertDelta = verticalAdjustment - currentVertical
 	local maxDeltaThisFrame = maxVertChangePerSec * deltaTime
 	if math.abs(vertDelta) > maxDeltaThisFrame then
@@ -422,9 +426,9 @@ local function updateBoatPhysics(deltaTime)
 
 	-- Set BodyVelocity max force depending on whether we need vertical authority
 	if isInWater then
-		bodyVelocity.MaxForce = Vector3.new(8000, 8000, 8000) * totalMass
+		bodyVelocity.MaxForce = Vector3.new(5000, 5000, 5000) * totalMass  -- Reduced from 8000 for smoother control
 	else
-		bodyVelocity.MaxForce = Vector3.new(8000, 0, 8000) * totalMass
+		bodyVelocity.MaxForce = Vector3.new(5000, 0, 5000) * totalMass
 	end
 
 	bodyVelocity.Velocity = finalVelocity
