@@ -2,29 +2,26 @@
 
 A complete Roblox boat physics system with realistic floating, driving, and interaction mechanics.
 
-## 📋 What's Included
-
-This repository contains a full boat physics implementation with:
 
 - **BoatServer.lua** - Server-side physics and control script
 - **BoatClient.lua** - Client-side interaction and input script
 - **BoatSetup.md** - Detailed setup and configuration guide
 - **QUICKSTART.md** - Fast 5-minute setup guide
 
-## ✨ Features
+## Features
 
-- 🌊 **Realistic Water Physics**: Floats naturally on terrain water using 4-point buoyancy system
-- 🎮 **Easy Interaction**: Press E to board boats with billboard GUI prompts
-- 🚤 **Smooth Driving**: W/A/S/D controls with proper acceleration and turning
-- 🏖️ **Terrain Support**: Drive onto land with realistic friction slowdown (feels like pushing!)
-- 🪂 **Fall Physics**: Realistically falls from elevated terrain into water
-- 🎯 **Optimized**: Client-side physics eliminates server lag
-- 🚀 **Performance**: No more 2-second lag spikes - physics runs locally
-- 🏝️ **Land Friction**: Heavy resistance on land (25x) vs smooth in water (2.5x)
-- 🎨 **Debug Mode**: Visual float point indicators for testing
-- 🎮 **Gamepad Support**: Works with Xbox/PlayStation controllers
+- **Realistic Water Physics**: Floats naturally on terrain water using 4-point buoyancy system
+-  **Easy Interaction**: Press E to board boats with billboard GUI prompts
+-  **Smooth Driving**: W/A/S/D controls with proper acceleration and turning
+-  **Terrain Support**: Drive onto land with realistic friction slowdown (feels like pushing!)
+-  **Fall Physics**: Realistically falls from elevated terrain into water
+-  **Optimized**: Client-side physics eliminates server lag
+-  **Performance**: No more 2-second lag spikes - physics runs locally
+-  **Land Friction**: Heavy resistance on land (25x) vs smooth in water (2.5x)
+-  **Debug Mode**: Visual float point indicators for testing
+-  **Gamepad Support**: Works with Xbox/PlayStation controllers
 
-## 🚀 Quick Start
+##  Quick Start
 
 1. **Install Client Script**
    - Put `BoatClient.lua` in: `StarterPlayer → StarterPlayerScripts`
@@ -48,7 +45,7 @@ This repository contains a full boat physics implementation with:
 
 See **QUICKSTART.md** for detailed 5-minute setup or **BoatSetup.md** for complete documentation.
 
-## 🎮 Controls
+##  Controls
 
 ### Boarding
 - Look at boat (within 10 studs)
@@ -61,7 +58,7 @@ See **QUICKSTART.md** for detailed 5-minute setup or **BoatSetup.md** for comple
 - **D** or **→**: Turn right
 - **Space**: Exit boat
 
-## 🔧 Configuration
+##  Configuration
 
 Edit the `CONFIG` table in `BoatClient.lua` to customize physics:
 
@@ -86,14 +83,14 @@ maxStabilizationTorque = 6.0, -- Max correction
 showDebugPoints = true,     -- Show float indicators
 ```
 
-## 📖 Documentation
+##  Documentation
 
 - **QUICKSTART.md** - Get started in 5 minutes
 - **BoatSetup.md** - Complete setup guide with troubleshooting
 - **BoatServer.lua** - Server script with inline comments
 - **BoatClient.lua** - Client script with inline comments
 
-## 🎯 Requirements Met
+##  Requirements Met
 
 This system implements all requested features:
 
@@ -107,7 +104,7 @@ This system implements all requested features:
 ✅ Does NOT react to player weight  
 ✅ Complete workspace and settings documentation  
 
-## 🐛 Troubleshooting
+##  Troubleshooting
 
 **Boat doesn't float?**
 - Unanchor the Hull part
@@ -129,7 +126,7 @@ This system implements all requested features:
 
 See **BoatSetup.md** for complete troubleshooting guide.
 
-## 📝 Technical Details
+##  Technical Details
 
 ### Physics System
 - Uses `BodyVelocity` and `BodyGyro` for movement
@@ -150,7 +147,7 @@ See **BoatSetup.md** for complete troubleshooting guide.
 - Efficient voxel reading for water detection
 - No more 2-second lag spikes!
 
-## 🔄 Migration from Old Scripts
+##  Migration from Old Scripts
 
 If you have the old `BoatScript.lua` or `CustomBoat.lua`:
 
@@ -160,7 +157,7 @@ If you have the old `BoatScript.lua` or `CustomBoat.lua`:
 4. Configuration is more user-friendly
 5. Better performance and stability
 
-## 📦 File Structure
+##  File Structure
 
 ```
 BoatPhysics/
@@ -174,7 +171,7 @@ BoatPhysics/
 └── workstation         # Example interaction script
 ```
 
-## 🤝 Contributing
+##  Contributing
 
 This is a complete, ready-to-use system. Feel free to:
 - Adjust configuration values for your game
@@ -182,12 +179,7 @@ This is a complete, ready-to-use system. Feel free to:
 - Add custom boat models
 - Create different boat types (speedboat, sailboat, etc.)
 
-## 📄 License
+##  License
 
 Free to use for your Roblox games. No attribution required.
 
-## 🎉 Enjoy!
-
-Your boat should now float realistically, be easy to board, and fun to drive!
-
-For questions or issues, see **BoatSetup.md** troubleshooting section.
